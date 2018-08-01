@@ -1533,7 +1533,20 @@ search_for_clones(Dir, Data, Thresholds) ->
     IndexStr = NumOfIndexStrs++lists:append([integer_list_to_string(Is)
 					     ||{_SeqNo, _FFA, ExpHashIndexPairs} <- Data,
 						{_, Is}<-[lists:unzip(ExpHashIndexPairs)]]),
-    SuffixTreeExec = filename:join(code:priv_dir(wrangler), "gsuffixtree"),
+    PrivSuffixTreeExec = filename:join(code:priv_dir(wrangler), "gsuffixtree"),
+    SuffixTreeExec = case filelib:is_file(PrivSuffixTreeExec) of
+                         false ->
+                             try
+                                 filename:join(
+                                   filename:dirname(escript:script_name()),
+                                   "gsuffixtree")
+                             catch
+                                 _:_ ->
+                                     "/usr/local/bin/gsuffixtree"
+                             end;
+                         true ->
+                             PrivSuffixTreeExec
+                     end,
     wrangler_suffix_tree:get_clones_by_suffix_tree_inc(Dir, IndexStr, MinLen,
                                                         MinFreq, 1, SuffixTreeExec).
    

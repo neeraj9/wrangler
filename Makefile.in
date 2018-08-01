@@ -77,7 +77,7 @@ ERL_OBJ = $(BUILD_FIRST) $(ERL_LAST)
 
 default: conf erl c elisp
 
-all: default docs
+all: default docs efactor
 
 CONF_SRC = Makefile.in c_src/suffixtree/Makefile.in \
 		c_src/gsuffixtree/Makefile.in
@@ -93,6 +93,22 @@ erl: $(ERL_OBJ)
 
 c:
 	@cd ./c_src; make; cd ../..
+
+efactor: default
+	-rm efactor.zip
+	-rm -rf tmp_bundle
+	(mkdir -p tmp_bundle/wrangler \
+	   	&& cp -rp priv tmp_bundle/wrangler \
+	   	&& cp -rp ebin tmp_bundle/wrangler \
+	   	&& mv tmp_bundle/wrangler/ebin/efactor.beam tmp_bundle/ \
+		&& cd tmp_bundle \
+		&& zip -r ../efactor.zip wrangler efactor.beam \
+		&& cd - \
+		&& cat priv/escript_prefix efactor.zip > efactor \
+		&& chmod +x efactor\
+		&& mv efactor priv/ \
+		&& rm -rf tmp_bundle \
+		&& rm efactor.zip)
 
 elisp: $(ELISP_OBJ)
 
