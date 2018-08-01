@@ -109,7 +109,9 @@
 	 block_expr_body/1, case_expr/2, case_expr_argument/1,
 	 case_expr_clauses/1, catch_expr/1, catch_expr_body/1,
 	 char/1, char_literal/1, char_value/1, class_qualifier/2,
+	 class_qualifier/3,
 	 class_qualifier_argument/1, class_qualifier_body/1,
+	 class_qualifier_stacktrace/1,
 	 clause/2, clause/3, clause_body/1, clause_guard/1,
 	 clause_patterns/1, comment/1, comment/2,
 	 comment_padding/1, comment_text/1, compact_list/1,
@@ -392,7 +394,7 @@
 %% @see case_expr/2
 %% @see catch_expr/1
 %% @see char/1
-%% @see class_qualifier/2
+%% @see class_qualifier/3
 %% @see clause/3
 %% @see comment/2
 %% @see cond_expr/1
@@ -3589,6 +3591,7 @@ fold_try_clause({clause, Pos, [P], Guard, Body}) ->
 	   class_qualifier ->
 	       {tuple, Pos,
 		[class_qualifier_argument(P), class_qualifier_body(P),
+		 class_qualifier_stacktrace(P),
 		 {var, Pos, '_'}]};
 	   _ ->
 	       {tuple, Pos, [P, {var, Pos, '_'}]}
@@ -3599,19 +3602,19 @@ unfold_try_clauses(Cs) ->
     [unfold_try_clause(C) || C <- Cs].
 
 unfold_try_clause({clause, Pos,  
- 		   [{tuple, _, [{atom, Pos1, throw}, V, _]}], Guard, Body}) ->
+ 		   [{tuple, _, [{atom, Pos1, throw}, V, Stacktrace]}], Guard, Body}) ->
     case Pos1 == get_pos(V) of 
 	true ->  {clause, Pos, [V], Guard, Body}; 
-	false -> {clause, Pos, [class_qualifier({atom, Pos1, throw}, V)], Guard, Body}
+	false -> {clause, Pos, [class_qualifier({atom, Pos1, throw}, V, Stacktrace)], Guard, Body}
     end;
 
-unfold_try_clause({clause, Pos, [{tuple, _, [C, V,_]}],
+unfold_try_clause({clause, Pos, [{tuple, _, [C, V, S]}],
  		   Guard, Body}) ->
-     {clause, Pos, [class_qualifier(C, V)], Guard, Body};
+     {clause, Pos, [class_qualifier(C, V, S)], Guard, Body};
 
-unfold_try_clause({clause, Pos, [{tuple, _, [C, V]}],
+unfold_try_clause({clause, Pos, [{tuple, _, [C, V, S]}],
 		   Guard, Body}) ->
-    {clause, Pos, [class_qualifier(C, V)], Guard, Body}.
+    {clause, Pos, [class_qualifier(C, V, S)], Guard, Body}.
 
 %% =====================================================================
 %% @spec clause_patterns(syntaxTree()) -> [syntaxTree()]
@@ -5366,7 +5369,7 @@ try_after_expr(Body, After) ->
 %% @see try_expr/3
 %% @see try_after_expr/2
 %% @see clause/3
-%% @see class_qualifier/2
+%% @see class_qualifier/3
 %% @see case_expr/2
 
 -record(try_expr, {body, clauses, handlers, 'after'}).
@@ -5469,7 +5472,8 @@ try_expr_after(Node) ->
     end.
 
 %% =====================================================================
-%% @spec class_qualifier(Class::syntaxTree(), Body::syntaxTree()) ->
+%% @spec class_qualifier(Class::syntaxTree(), Body::syntaxTree(),
+%%                       Stacktrace :: syntaxTree()) ->
 %%           syntaxTree()
 %%
 %% @doc Creates an abstract class qualifier. The result represents
@@ -5479,17 +5483,26 @@ try_expr_after(Node) ->
 %% @see class_qualifier_body/1
 %% @see try_expr/4
 
--record(class_qualifier, {class, body}).
-
-%% type(Node) = class_qualifier
-%% data(Node) = #class_qualifier{class :: Class, body :: Body}
-%%
-%%	Class = Body = syntaxTree()
+-record(class_qualifier, {class, body, stacktrace}).
 
 class_qualifier(Class, Body) ->
+    Underscore = {var, get_pos(Body), '_'},
+    tree(class_qualifier,
+	 #class_qualifier{class = update_ann({syntax_path, class_qualifier_class},Class),
+                          body = update_ann({syntax_path, class_qualifier_body}, Body),
+                          stacktrace = update_ann({syntax_path, class_qualifier_stacktrace}, Underscore)}).
+
+
+%% type(Node) = class_qualifier
+%% data(Node) = #class_qualifier{class :: Class, body :: Body, stacktrace :: Stacktrace}
+%%
+%%	Class = Body = Stacktrace = syntaxTree()
+
+class_qualifier(Class, Body, Stacktrace) ->
     tree(class_qualifier,
 	 #class_qualifier{class = update_ann({syntax_path, class_qualifier_class},Class), 
-                          body = update_ann({syntax_path, class_qualifier_body}, Body)}).
+                          body = update_ann({syntax_path, class_qualifier_body}, Body),
+                          stacktrace = update_ann({syntax_path, class_qualifier_stacktrace}, Stacktrace)}).
 
 %% =====================================================================
 %% @spec class_qualifier_argument(syntaxTree()) -> syntaxTree()
@@ -5511,6 +5524,16 @@ class_qualifier_argument(Node) ->
 
 class_qualifier_body(Node) ->
     (data(Node))#class_qualifier.body.
+
+%% =====================================================================
+%% @spec class_qualifier_stacktrace(syntaxTree()) -> syntaxTree()
+%%
+%% @doc Returns the stacktrace subtree of a <code>class_qualifier</code> node.
+%%
+%% @see class_qualifier/1
+
+class_qualifier_stacktrace(Node) ->
+    (data(Node))#class_qualifier.stacktrace.
 
 %% =====================================================================
 %% @spec implicit_fun(Name::syntaxTree(), Arity::syntaxTree()) ->
@@ -6315,7 +6338,8 @@ subtrees(T) ->
 	    catch_expr -> [[catch_expr_body(T)]];
 	    class_qualifier ->
 		[[class_qualifier_argument(T)],
-		 [class_qualifier_body(T)]];
+		 [class_qualifier_body(T)],
+		 [class_qualifier_stacktrace(T)]];
 	    clause ->
 		case clause_guard(T) of
 		  none -> [clause_patterns(T), clause_body(T)];
@@ -6472,8 +6496,8 @@ make_tree(binary_generator, [[P], [E]]) -> binary_generator(P, E);
 make_tree(block_expr, [B]) -> block_expr(B);
 make_tree(case_expr, [[A], C]) -> case_expr(A, C);
 make_tree(catch_expr, [[B]]) -> catch_expr(B);
-make_tree(class_qualifier, [[A], [B]]) ->
-    class_qualifier(A, B);
+make_tree(class_qualifier, [[A], [B], [C]]) ->
+    class_qualifier(A, B, C);
 make_tree(clause, [P, B]) -> clause(P, none, B);
 make_tree(clause, [P, [G], B]) -> clause(P, G, B);
 make_tree(cond_expr, [C]) -> cond_expr(C);
